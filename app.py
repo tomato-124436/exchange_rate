@@ -1,46 +1,51 @@
-import requests
 import streamlit as st
+from langchain.messages import HumanMessage
+from langchain.chat_models import init_chat_model
+from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain.tools import tool
+from langgraph.checkpoint.memory import InMemorySaver
+import requests
 
-st.title("💱 실시간 환율 조회 앱")
-st.write("Frankfurter API를 활용한 간단한 환율 계산기야.")
+load_dotenv()
 
-# 통화 선택 옵션
-currencies = ["USD", "EUR", "GBP", "JPY", "KRW", "CAD", "AUD"]
+@tool
+def get_currency() -> str :
+    "Frankfurter API를 사용하여 USD 대비 KRW(원화) 환율 조회"
+    url = "https://api.frankfurter.dev/v1/latest?base=USD&symbols=KRW"
 
-col1, col2 = st.columns(2)
-with col1:
-  base_currency = st.selectbox("기준 통화", currencies, index=0)  # 기본 USD
-with col2:
-  target_currency = st.selectbox(
-      "변환할 통화", currencies, index=4
-  )  # 기본 KRW
-
-# 금액 입력
-amount = st.number_input(
-    "금액 입력", value=1.0, min_value=0.0, step=1.0
-)
-
-# 조회 버튼
-if st.button("환율 계산하기"):
-  if base_currency == target_currency:
-    st.warning("기준 통화와 변환할 통화가 같아!")
-  else:
     try:
-      # Frankfurter API 호출
-      url = f"https://api.frankfurter.app/latest?from={base_currency}&to={target_currency}"
-      response = requests.get(url)
-      data = response.json()
+        response = requests.get(url)
+        response.raise_for_status() # 에러 발생 시 예외 처리
+        data = response.json()
 
-      if "rates" in data:
-        rate = data["rates"][target_currency]
-        result = amount * rate
-        st.success(
-            f"**{amount:,.2f} {base_currency}** = **{result:,.2f}"
-            f" {target_currency}**"
-        )
-        st.caption(f"적용 환율: 1 {base_currency} = {rate:,.4f} {target_currency}")
-      else:
-        st.error("환율 정보를 가져오지 못했어.")
+        # 결과 출력
+        date = data.get("date")
+        rate = data.get("rates", {}).get("KRW")
+
+        return f"[기준일자] {date}, [원/달러 환율] 1 USD = {rate:,.2f} KRW"
     except Exception as e:
-      st.error(f"오류가 발생했어: {e}")
-      
+        return f"환율 정보를 가져오는 중 오류가 발생했습니다: {e}"
+
+if "agent" not in st.session_state :
+    model = init_chat_model("gpt-5.5")
+    st.session_state.agent = create_agent(model, tools = [get_currency], checkpointer=InMemorySaver())
+
+if "messages" not in st.session_state :
+    st.session_state.messages = []
+
+st.title("실시간 환율 조회 에이전트")
+
+prompt = st.chat_input("무엇이든 물어보세요")
+if prompt:
+    # response = model.invoke(prompt)
+    response = st.session_state.agent.invoke(
+        {"messages" : [HumanMessage(prompt)]},
+        {"configurable" : {"thread_id" : "1"}}
+    )
+    st.session_state.messages.append({"role" : "user", "content" : prompt})
+    st.session_state.messages.append({"role" : "ai", "content" : response['messages'][-1].content})
+
+for message in st.session_state.messages :
+    with st.chat_message(message['role']) :
+        st.write(message['content'])
