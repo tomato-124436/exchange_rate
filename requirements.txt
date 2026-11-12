@@ -66,3 +66,9 @@ watchdog==7.1.0
 websockets==17.4
 xxhash==4.1.0
 zstandard==0.25.0
+
+
+
+streamlit
+openai
+python-dotenv
